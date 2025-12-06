@@ -1,98 +1,74 @@
 import React, { useState, useRef, useMemo, useEffect, Suspense } from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
+import { Canvas, useFrame, ThreeElements } from '@react-three/fiber';
 import * as THREE from 'three';
-import { PerspectiveCamera, Stars, Environment } from '@react-three/drei';
+import { PerspectiveCamera, Environment } from '@react-three/drei';
 import { EffectComposer, Bloom, Vignette } from '@react-three/postprocessing';
 import { easing } from 'maath';
 
-// --- 1. 梦幻配置 ---
+// Fix for missing R3F types in JSX
+declare global {
+  namespace JSX {
+    interface IntrinsicElements extends ThreeElements {}
+  }
+}
+
+// --- 配置 ---
 const CONFIG = {
   colors: {
     bg: '#000000',
-    red: '#D00000',       // 丝绒红
-    gold: '#FFD700',      // 24K金
-    green: '#004225',     // 英国赛车绿/深松绿
-    lightGreen: '#2E8B57',// 海洋绿
-    white: '#FFFFFF',
+    red: '#D00000', gold: '#FFD700', green: '#004225', lightGreen: '#2E8B57', white: '#FFFFFF',
   },
-  counts: {
-    foliage: 12000,
-    items: 480,
-    snowflakes: 800,
-  }
+  counts: { foliage: 10000, items: 400, snowflakes: 600 }
 };
 
-// --- 2. 几何体工厂 ---
+// --- 几何体工厂 ---
+// 使用 lazy 初始化或简单的全局常量工厂
+class CaneCurve extends THREE.Curve<THREE.Vector3> {
+  constructor() {
+    super();
+  }
+  getPoint(t: number, optionalTarget = new THREE.Vector3()) {
+    if (t < 0.6) return optionalTarget.set(0, t * 1.66, 0); 
+    const angle = (t - 0.6) / 0.4 * Math.PI; 
+    return optionalTarget.set(0.2 - Math.cos(angle) * 0.2, 1.0 + Math.sin(angle) * 0.2, 0);
+  }
+}
 
 const createStarGeometry = () => {
   const shape = new THREE.Shape();
-  const outerRadius = 1;
-  const innerRadius = 0.45;
-  const points = 5;
+  const outerRadius = 1; const innerRadius = 0.45; const points = 5;
   for (let i = 0; i < points * 2; i++) {
     const r = i % 2 === 0 ? outerRadius : innerRadius;
     const a = (i / (points * 2)) * Math.PI * 2;
-    
-    // [修复] 角度修改：
-    // 之前是 Math.PI / 2 * 3 (270度，朝下)
-    // 现在改为 Math.PI / 2 (90度，朝上)
     const x = Math.cos(a + Math.PI / 2) * r;
     const y = Math.sin(a + Math.PI / 2) * r;
-    
-    if (i === 0) shape.moveTo(x, y);
-    else shape.lineTo(x, y);
+    if (i === 0) shape.moveTo(x, y); else shape.lineTo(x, y);
   }
   shape.closePath();
   return new THREE.ExtrudeGeometry(shape, { depth: 0.3, bevelEnabled: true, bevelThickness: 0.05, bevelSize: 0.05, bevelSegments: 2 });
 };
 
-// 迷你胖拐杖
-const createCaneGeometry = () => {
-  class CaneCurve extends THREE.Curve<THREE.Vector3> {
-    constructor() {
-      super();
-    }
-    
-    getPoint(t: number) {
-      if (t < 0.6) {
-        return new THREE.Vector3(0, t * 1.66, 0); 
-      } else {
-        const angle = (t - 0.6) / 0.4 * Math.PI; 
-        const r = 0.2; 
-        const cx = r; 
-        const cy = 1.0; 
-        return new THREE.Vector3(cx - Math.cos(angle) * r, cy + Math.sin(angle) * r, 0);
-      }
-    }
-  }
-  return new THREE.TubeGeometry(new CaneCurve(), 32, 0.15, 8, false);
-};
-
-// 铃铛身
 const createBellBodyGeometry = () => {
   const points = [];
   for (let i = 0; i < 10; i++) {
-    const x = 0.5 * Math.pow(i / 10, 0.6) + 0.1; 
-    const y = -0.8 + (i / 10) * 1.3;
-    points.push(new THREE.Vector2(x, y));
+    points.push(new THREE.Vector2(0.5 * Math.pow(i / 10, 0.6) + 0.1, -0.8 + (i / 10) * 1.3));
   }
-  points.push(new THREE.Vector2(0.4, -0.9));
-  points.push(new THREE.Vector2(0, -0.9)); 
+  points.push(new THREE.Vector2(0.4, -0.9), new THREE.Vector2(0, -0.9)); 
   return new THREE.LatheGeometry(points, 24);
 };
 
-// --- 3. 材质与贴图 ---
-
+// --- 材质与贴图 ---
 const useStripedTexture = () => {
   return useMemo(() => {
     const canvas = document.createElement('canvas');
-    canvas.width = 128; canvas.height = 128;
-    const ctx = canvas.getContext('2d')!;
-    ctx.fillStyle = '#FFF'; ctx.fillRect(0, 0, 128, 128);
+    canvas.width = 64; canvas.height = 64; 
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return new THREE.Texture();
+    ctx.fillStyle = '#FFF'; ctx.fillRect(0, 0, 64, 64);
     ctx.fillStyle = '#C41E3A';
     ctx.beginPath();
-    for (let i = -128; i < 256; i += 32) {
-        ctx.moveTo(i, 0); ctx.lineTo(i + 20, 128); ctx.lineTo(i + 45, 128); ctx.lineTo(i + 25, 0);
+    for (let i = -64; i < 128; i += 16) {
+        ctx.moveTo(i, 0); ctx.lineTo(i + 10, 64); ctx.lineTo(i + 22, 64); ctx.lineTo(i + 12, 0);
     }
     ctx.fill();
     const tex = new THREE.CanvasTexture(canvas);
@@ -102,7 +78,6 @@ const useStripedTexture = () => {
   }, []);
 };
 
-// 雪顶粒子
 const SnowParticleMaterial = {
   uniforms: { uTime: { value: 0 }, uColor: { value: new THREE.Color('#FFFFFF') } },
   vertexShader: `
@@ -120,72 +95,62 @@ const SnowParticleMaterial = {
   fragmentShader: `
     uniform vec3 uColor;
     void main() {
-      float d = distance(gl_PointCoord, vec2(0.5));
-      if(d > 0.5) discard;
+      if(distance(gl_PointCoord, vec2(0.5)) > 0.5) discard;
       gl_FragColor = vec4(uColor, 1.0);
     }
   `
 };
 
-// --- 4. 组件 ---
+// --- 共享几何体 Context ---
+const GeometryContext = React.createContext<any>(null);
 
-// 礼物盒
-function GiftBox({ color, ribbonColor, ratio = 1 }: { color: string, ribbonColor: string, ratio?: number }) {
-  const width = 0.6;
-  const height = 0.6 * ratio;
-  const depth = 0.6;
-  
+const Geometries = () => {
+  const geos = useMemo(() => ({
+    star: createStarGeometry(),
+    cane: new THREE.TubeGeometry(new CaneCurve(), 32, 0.15, 8, false),
+    bell: createBellBodyGeometry(),
+    sphere: new THREE.SphereGeometry(0.5, 24, 24),
+    giftBox: new THREE.BoxGeometry(0.6, 0.6, 0.6),
+    ribbonH: new THREE.BoxGeometry(0.62, 0.62, 0.12),
+    ribbonV: new THREE.BoxGeometry(0.12, 0.62, 0.62),
+  }), []);
+  return geos;
+}
+
+// --- 组件 ---
+
+const GiftBox = React.memo(({ color, ribbonColor, ratio = 1 }: { color: string, ribbonColor: string, ratio?: number }) => {
+  const geos = React.useContext(GeometryContext);
   return (
-    <group>
-      <mesh>
-        <boxGeometry args={[width, height, depth]} />
-        <meshStandardMaterial color={color} roughness={0.3} metalness={0.1} envMapIntensity={1} />
+    <group scale={[1, ratio, 1]}>
+      <mesh geometry={geos.giftBox}>
+        <meshStandardMaterial color={color} roughness={0.3} metalness={0.1} />
       </mesh>
-      <mesh position={[0, 0, 0]}>
-        <boxGeometry args={[width + 0.02, height + 0.02, depth * 0.2]} />
+      <mesh geometry={geos.ribbonH}>
         <meshStandardMaterial color={ribbonColor} metalness={0.6} roughness={0.2} />
       </mesh>
-      <mesh position={[0, 0, 0]}>
-        <boxGeometry args={[width * 0.2, height + 0.02, depth + 0.02]} />
+      <mesh geometry={geos.ribbonV}>
         <meshStandardMaterial color={ribbonColor} metalness={0.6} roughness={0.2} />
-      </mesh>
-      <mesh position={[0, height/2, 0]} rotation={[0,0,0.5]} scale={[0.2, 0.2, 0.2]}>
-        <torusGeometry args={[0.5, 0.2, 8, 16]} />
-        <meshStandardMaterial color={ribbonColor} metalness={0.6} />
-      </mesh>
-      <mesh position={[0, height/2, 0]} rotation={[0,0,-0.5]} scale={[0.2, 0.2, 0.2]}>
-        <torusGeometry args={[0.5, 0.2, 8, 16]} />
-        <meshStandardMaterial color={ribbonColor} metalness={0.6} />
       </mesh>
     </group>
   );
-}
+});
 
-// 复杂铃铛
-function ComplexBell() {
-  const bodyGeo = useMemo(() => createBellBodyGeometry(), []);
+const ComplexBell = React.memo(() => {
+  const geos = React.useContext(GeometryContext);
   return (
     <group scale={[0.4, 0.4, 0.4]}>
-      <mesh geometry={bodyGeo}>
-        <meshStandardMaterial color="#FFD700" metalness={1.0} roughness={0.15} envMapIntensity={3.0} />
+      <mesh geometry={geos.bell}>
+        <meshStandardMaterial color="#FFD700" metalness={1.0} roughness={0.15} />
       </mesh>
-      <group position={[0, 0.4, 0]} rotation={[0.2, 0, 0]}>
-         <mesh position={[0, 0, 0.15]}><sphereGeometry args={[0.15]} /><meshStandardMaterial color={CONFIG.colors.red} roughness={0.3} /></mesh>
-         <mesh position={[-0.2, 0, 0]} rotation={[0, 0, 0.5]}><torusGeometry args={[0.15, 0.06, 8, 16]} /><meshStandardMaterial color={CONFIG.colors.red} roughness={0.3} /></mesh>
-         <mesh position={[0.2, 0, 0]} rotation={[0, 0, -0.5]}><torusGeometry args={[0.15, 0.06, 8, 16]} /><meshStandardMaterial color={CONFIG.colors.red} roughness={0.3} /></mesh>
-      </group>
-      <group position={[0, 0.5, -0.1]}>
-         <mesh position={[-0.2, 0.1, 0]} rotation={[0, 0, 0.5]}><sphereGeometry args={[0.25]} /><meshStandardMaterial color={CONFIG.colors.green} roughness={0.5} /><group scale={[1, 0.2, 0.5]} /></mesh>
-         <mesh position={[0.2, 0.1, 0]} rotation={[0, 0, -0.5]}><sphereGeometry args={[0.25]} /><meshStandardMaterial color={CONFIG.colors.green} roughness={0.5} /><group scale={[1, 0.2, 0.5]} /></mesh>
-      </group>
-      <mesh position={[0, -0.8, 0]}><sphereGeometry args={[0.15]} /><meshStandardMaterial color="#333" /></mesh>
-      <group position={[0, 0.5, 0]} scale={[0.5, 0.5, 0.5]}><SparkleCap radius={0.5} count={30} /></group>
+      <mesh position={[0, -0.8, 0]} geometry={geos.sphere} scale={0.3}>
+        <meshStandardMaterial color="#333" />
+      </mesh>
     </group>
   );
-}
+});
 
-// 雪顶
-function SparkleCap({ radius, count = 80 }: { radius: number, count?: number }) {
+function SparkleCap({ radius, count = 50 }: { radius: number, count?: number }) {
   const shaderRef = useRef<THREE.ShaderMaterial>(null);
   const { positions, randoms, sizes } = useMemo(() => {
     const pos = new Float32Array(count * 3);
@@ -206,44 +171,43 @@ function SparkleCap({ radius, count = 80 }: { radius: number, count?: number }) 
 
   useFrame((state) => { if(shaderRef.current) shaderRef.current.uniforms.uTime.value = state.clock.elapsedTime; });
   return (
-    <group>
-        <points>
-            <bufferGeometry>
-                <bufferAttribute attach="attributes-position" count={count} array={positions} itemSize={3} />
-                <bufferAttribute attach="attributes-aRandom" count={count} array={randoms} itemSize={1} />
-                <bufferAttribute attach="attributes-aSize" count={count} array={sizes} itemSize={1} />
-            </bufferGeometry>
-            {/* @ts-ignore */}
-            <shaderMaterial ref={shaderRef} args={[SnowParticleMaterial]} transparent depthWrite={false} />
-        </points>
-        <mesh position={[0, radius * 0.85, 0]}><sphereGeometry args={[radius * 0.6, 16, 8, 0, Math.PI*2, 0, Math.PI*0.3]} /><meshBasicMaterial color="#FFF" /></mesh>
-    </group>
+    <points>
+        <bufferGeometry>
+            <bufferAttribute attach="attributes-position" count={count} array={positions} itemSize={3} />
+            <bufferAttribute attach="attributes-aRandom" count={count} array={randoms} itemSize={1} />
+            <bufferAttribute attach="attributes-aSize" count={count} array={sizes} itemSize={1} />
+        </bufferGeometry>
+        {/* @ts-ignore */}
+        <shaderMaterial ref={shaderRef} args={[SnowParticleMaterial]} transparent depthWrite={false} />
+    </points>
   )
 }
 
-function MetalBall({ color }: { color: string }) {
+const MetalBall = React.memo(({ color }: { color: string }) => {
+  const geos = React.useContext(GeometryContext);
   return (
     <group>
-      <mesh><sphereGeometry args={[0.5, 32, 32]} /><meshStandardMaterial color={color} metalness={1.0} roughness={0.12} envMapIntensity={3.5} /></mesh>
+      <mesh geometry={geos.sphere}>
+        <meshStandardMaterial color={color} metalness={1.0} roughness={0.12} envMapIntensity={2.5} />
+      </mesh>
       <SparkleCap radius={0.5} />
     </group>
   );
-}
+});
 
-function RealCandyCane({ randRotation }: { randRotation: THREE.Euler }) {
-  const geo = useMemo(() => createCaneGeometry(), []);
+const RealCandyCane = React.memo(() => {
+  const geos = React.useContext(GeometryContext);
   const tex = useStripedTexture();
   return (
-    <group rotation={randRotation}> 
-      <mesh geometry={geo}><meshStandardMaterial map={tex} roughness={0.4} metalness={0.2} /></mesh>
-    </group>
+    <mesh geometry={geos.cane}>
+      <meshStandardMaterial map={tex} roughness={0.4} metalness={0.2} />
+    </mesh>
   );
-}
+});
 
-// 顶星
 function RealStar() {
-  const geo = useMemo(() => createStarGeometry(), []);
   const ref = useRef<THREE.Group>(null);
+  const geos = React.useContext(GeometryContext);
   useFrame((state) => {
     if (ref.current) {
       ref.current.rotation.y = state.clock.elapsedTime * 0.4;
@@ -251,20 +215,30 @@ function RealStar() {
     }
   });
   return (
-    <group ref={ref} position={[0, 7.8, 0]} scale={[1, 1, 1]}>
-      <mesh geometry={geo}><meshStandardMaterial color={CONFIG.colors.gold} emissive={CONFIG.colors.gold} emissiveIntensity={4.0} toneMapped={false} /></mesh>
-      <pointLight intensity={30} color="#FFD700" distance={10} decay={2} />
+    <group ref={ref} position={[0, 7.8, 0]}>
+      <mesh geometry={geos.star}>
+        <meshStandardMaterial color={CONFIG.colors.gold} emissive={CONFIG.colors.gold} emissiveIntensity={4.0} toneMapped={false} />
+      </mesh>
+      <pointLight intensity={20} color="#FFD700" distance={10} decay={2} />
     </group>
   );
 }
 
-// --- 5. 装饰系统 ---
+// --- 核心动画系统 ---
+
+const DecorationContent = React.memo(({ item }: { item: any }) => {
+   if (item.type === 'red_ball') return <MetalBall color={CONFIG.colors.red} />;
+   if (item.type === 'gold_ball') return <MetalBall color={CONFIG.colors.gold} />;
+   if (item.type === 'cane') return <RealCandyCane />;
+   if (item.type === 'bell') return <ComplexBell />;
+   if (item.type === 'gift') return <GiftBox color={item.giftColor} ribbonColor={item.ribbonColor} ratio={item.giftRatio} />;
+   return null;
+});
 
 function DecorationSystem({ state }: { state: number }) {
   const items = useMemo(() => {
     return new Array(CONFIG.counts.items).fill(0).map((_, i) => {
       const typeRand = Math.random();
-      
       let type = 'red_ball';
       if (typeRand > 0.85) type = 'gift';     
       else if (typeRand > 0.70) type = 'cane'; 
@@ -273,28 +247,20 @@ function DecorationSystem({ state }: { state: number }) {
 
       const p = Math.pow(Math.random(), 0.6); 
       const y = -7 + 14 * (1 - p); 
-      
-      let baseR = 5.8; // 45度锥角
+      let baseR = 5.8; 
+      if (type === 'cane') baseR -= 1.0; 
+      if (type === 'gift') baseR -= 0.5;
 
-      let rFactor = baseR;
-      if (type === 'cane') rFactor = baseR - 1.0; 
-      if (type === 'gift') rFactor = baseR - 0.5;
-
-      const r = rFactor * p; 
+      const r = baseR * p; 
       const angle = Math.random() * Math.PI * 2;
-      const target = [Math.cos(angle) * r, y, Math.sin(angle) * r];
+      const targetVec = new THREE.Vector3(Math.cos(angle) * r, y, Math.sin(angle) * r);
 
       const cr = 20 + Math.random() * 10;
       const cTheta = Math.random() * Math.PI * 2;
       const cPhi = Math.acos(2 * Math.random() - 1);
-      const chaos = [cr * Math.sin(cPhi) * Math.cos(cTheta), cr * Math.sin(cPhi) * Math.sin(cTheta), cr * Math.cos(cPhi)];
+      const chaosVec = new THREE.Vector3(cr * Math.sin(cPhi) * Math.cos(cTheta), cr * Math.sin(cPhi) * Math.sin(cTheta), cr * Math.cos(cPhi));
 
-      const randRot = new THREE.Euler(
-        Math.random() * 0.5, 
-        Math.random() * Math.PI * 2, 
-        (Math.random() - 0.5) * 0.5
-      );
-
+      const randRot = new THREE.Euler(Math.random()*0.5, Math.random()*Math.PI*2, (Math.random()-0.5)*0.5);
       let scale = Math.random() * 0.2 + 0.7;
       let giftRatio = 1;
       let giftColor = CONFIG.colors.green; 
@@ -303,77 +269,57 @@ function DecorationSystem({ state }: { state: number }) {
       if (type === 'gift') {
           scale *= 0.8; 
           const colRnd = Math.random();
-          if (colRnd > 0.3) {
-             giftColor = Math.random() > 0.5 ? CONFIG.colors.green : CONFIG.colors.lightGreen;
-             ribbonColor = CONFIG.colors.red;
-          } else if (colRnd > 0.15) {
-             giftColor = CONFIG.colors.red;
-             ribbonColor = CONFIG.colors.gold;
-          } else {
-             giftColor = CONFIG.colors.gold;
-             ribbonColor = CONFIG.colors.red;
-          }
+          if (colRnd > 0.3) { giftColor = Math.random() > 0.5 ? CONFIG.colors.green : CONFIG.colors.lightGreen; ribbonColor = CONFIG.colors.red; }
+          else if (colRnd > 0.15) { giftColor = CONFIG.colors.red; ribbonColor = CONFIG.colors.gold; }
+          else { giftColor = CONFIG.colors.gold; ribbonColor = CONFIG.colors.red; }
           if (Math.random() > 0.5) giftRatio = 1.4; 
       }
-      
       if (type === 'cane') scale = 1.0; 
 
-      return { id: i, type, target, chaos, randRot, scale, giftColor, ribbonColor, giftRatio };
+      return { id: i, type, targetVec, chaosVec, randRot, scale, giftColor, ribbonColor, giftRatio };
     });
   }, []);
 
+  const refs = useRef<(THREE.Group | null)[]>([]);
+
+  useFrame((stateObj, delta) => {
+    const isAssembled = state > 0.5;
+    const time = stateObj.clock.elapsedTime;
+    for(let i=0; i<items.length; i++) {
+        const ref = refs.current[i];
+        if(!ref) continue;
+        const item = items[i];
+        const target = isAssembled ? item.targetVec : item.chaosVec;
+        easing.damp3(ref.position, target, 0.5, delta);
+        
+        if (isAssembled) {
+            if(item.type === 'gift') ref.rotation.y = item.randRot.y + Math.sin(time + item.id) * 0.1;
+            else if (item.type !== 'cane') ref.rotation.y += delta * 0.8;
+            ref.position.y += Math.sin(time * 2 + item.id) * 0.005;
+        } else {
+            ref.rotation.x += delta; ref.rotation.z += delta;
+        }
+    }
+  });
+
   return (
     <group>
-      {items.map((item) => (
-        <DecorationItem key={item.id} item={item} state={state} />
+      {items.map((item, i) => (
+        <group key={item.id} ref={el => { refs.current[i] = el; }} position={item.chaosVec} scale={item.scale} rotation={item.randRot}>
+           <DecorationContent item={item} />
+        </group>
       ))}
     </group>
   );
 }
 
-function DecorationItem({ item, state }: any) {
-  const ref = useRef<THREE.Group>(null);
-  
-  useFrame((stateObj, delta) => {
-    if(!ref.current) return;
-    const targetVec = state > 0.5 ? new THREE.Vector3(...item.target) : new THREE.Vector3(...item.chaos);
-    easing.damp3(ref.current.position, targetVec, 0.5, delta);
-    
-    if (state > 0.5) {
-       if(item.type === 'cane') {
-       } else if (item.type === 'gift') {
-           ref.current.rotation.y = item.randRot.y + Math.sin(stateObj.clock.elapsedTime + item.id) * 0.1;
-       } else {
-           ref.current.rotation.y += delta * 0.8;
-       }
-       ref.current.position.y += Math.sin(stateObj.clock.elapsedTime * 2 + item.id) * 0.005;
-    } else {
-       ref.current.rotation.x += delta; ref.current.rotation.z += delta;
-    }
-  });
-
-  return (
-    <group ref={ref} position={item.chaos} scale={item.scale} rotation={item.randRot}>
-       {item.type === 'red_ball' && <MetalBall color={CONFIG.colors.red} />}
-       {item.type === 'gold_ball' && <MetalBall color={CONFIG.colors.gold} />}
-       {item.type === 'cane' && <RealCandyCane randRotation={new THREE.Euler(0,0,0)} />}
-       {item.type === 'bell' && <ComplexBell />}
-       {item.type === 'gift' && <GiftBox color={item.giftColor} ribbonColor={item.ribbonColor} ratio={item.giftRatio} />}
-    </group>
-  );
-}
-
-// --- 6. 环境飘雪 ---
 function FallingSnow() {
   const count = CONFIG.counts.snowflakes;
   const mesh = useRef<THREE.InstancedMesh>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
   const particles = useMemo(() => new Array(count).fill(0).map(() => ({
-      x: (Math.random() - 0.5) * 60,
-      y: (Math.random() - 0.5) * 50,
-      z: (Math.random() - 0.5) * 40,
-      speed: 0.5 + Math.random() * 1.5,
-      factor: Math.random()
+      x: (Math.random() - 0.5) * 60, y: (Math.random() - 0.5) * 50, z: (Math.random() - 0.5) * 40,
+      speed: 0.5 + Math.random() * 1.5, factor: Math.random()
   })), []);
 
   useFrame((state, delta) => {
@@ -381,16 +327,12 @@ function FallingSnow() {
     particles.forEach((p, i) => {
       p.y -= p.speed * delta;
       if (p.y < -25) p.y = 25;
-      dummy.position.set(
-        p.x + Math.sin(state.clock.elapsedTime + p.factor) * 2,
-        p.y,
-        p.z + Math.cos(state.clock.elapsedTime * p.factor) * 2
-      );
+      dummy.position.set(p.x + Math.sin(state.clock.elapsedTime+p.factor)*2, p.y, p.z + Math.cos(state.clock.elapsedTime*p.factor)*2);
       dummy.scale.setScalar(0.08); 
       dummy.updateMatrix();
       mesh.current!.setMatrixAt(i, dummy.matrix);
     });
-    mesh.current.instanceMatrix.needsUpdate = true;
+    mesh.current!.instanceMatrix.needsUpdate = true;
   });
 
   return (
@@ -401,15 +343,11 @@ function FallingSnow() {
   );
 }
 
-// 针叶
 const FoliageMaterial = {
   uniforms: { uTime: { value: 0 }, uProgress: { value: 0 } },
   vertexShader: `
-    uniform float uTime;
-    uniform float uProgress;
-    attribute vec3 aChaos;
-    attribute vec3 aTarget;
-    attribute float aSize;
+    uniform float uTime; uniform float uProgress;
+    attribute vec3 aChaos; attribute vec3 aTarget; attribute float aSize;
     varying float vAlpha;
     float ease(float t) { return t < .5 ? 4. * t * t * t : (t - 1.) * (2. * t - 2.) * (2. * t - 2.) + 1.; }
     void main() {
@@ -471,32 +409,29 @@ function Foliage({ state }: { state: number }) {
   );
 }
 
-// --- 7. 场景 ---
-
 function Scene({ isPressed, mousePos }: { isPressed: boolean, mousePos: React.MutableRefObject<any> }) {
   const [targetState, setTargetState] = useState(0);
+  const geos = Geometries();
+
   useEffect(() => { setTargetState(isPressed ? 1 : 0); }, [isPressed]);
 
   useFrame((state) => {
     const mx = (mousePos.current.x / window.innerWidth) * 2 - 1;
     const my = -(mousePos.current.y / window.innerHeight) * 2 + 1;
-    const targetX = mx * 10;
-    const targetY = my * 8;
-    state.camera.position.x = THREE.MathUtils.lerp(state.camera.position.x, targetX, 0.05);
-    state.camera.position.y = THREE.MathUtils.lerp(state.camera.position.y, targetY, 0.05);
+    state.camera.position.x = THREE.MathUtils.lerp(state.camera.position.x, mx * 10, 0.05);
+    state.camera.position.y = THREE.MathUtils.lerp(state.camera.position.y, my * 8, 0.05);
     state.camera.lookAt(0, -1, 0); 
   });
 
   return (
-    <>
+    <GeometryContext.Provider value={geos}>
       <PerspectiveCamera makeDefault position={[0, 0, 32]} fov={35} />
       <color attach="background" args={[CONFIG.colors.bg]} />
-      
-      <Environment preset="warehouse" background={false} /> 
+      <Environment preset="city" /> 
 
-      <ambientLight intensity={0.2} />
+      <ambientLight intensity={0.5} />
       <spotLight position={[10, 20, 20]} angle={0.5} intensity={50} color="#FFD700" castShadow />
-      <pointLight position={[-10, -5, 10]} intensity={20} color="#E0FFFF" />
+      <pointLight position={[-10, -5, 10]} intensity={10} color="#E0FFFF" />
       
       <FallingSnow />
 
@@ -507,14 +442,12 @@ function Scene({ isPressed, mousePos }: { isPressed: boolean, mousePos: React.Mu
       </group>
 
       <EffectComposer enableNormalPass={false}>
-        <Bloom luminanceThreshold={0.8} mipmapBlur intensity={1.8} radius={0.6} />
+        <Bloom luminanceThreshold={0.8} mipmapBlur intensity={1.5} radius={0.5} />
         <Vignette eskil={false} offset={0.1} darkness={0.5} />
       </EffectComposer>
-    </>
+    </GeometryContext.Provider>
   );
 }
-
-// --- 8. 入口 ---
 
 export default function App() {
   const [isPressed, setIsPressed] = useState(false);
@@ -529,9 +462,9 @@ export default function App() {
       onTouchEnd={() => setIsPressed(false)}
       onMouseMove={(e) => { mousePos.current = { x: e.clientX, y: e.clientY }; }}
     >
-      <div style={{ position: 'absolute', zIndex: 10, padding: '40px', width: '100%', pointerEvents: 'none', color: '#FFD700', fontFamily: 'serif' }}>
-        <h1 style={{ fontSize: '3rem', margin: 0, letterSpacing: '0.2em', textShadow: '0 0 20px rgba(255,215,0,0.6)' }}>MERRY CHRISTMAS</h1>
-        <p style={{ opacity: 0.8, letterSpacing: '0.1em' }}>{isPressed ? "Interactive 3D Installation" : "Hold to Assemble"}</p>
+      <div style={{ position: 'absolute', zIndex: 10, padding: '40px', width: '100%', pointerEvents: 'none', color: '#FFD700', fontFamily: 'serif', textAlign: 'center' }}>
+        <h1 style={{ fontSize: 'clamp(2rem, 5vw, 4rem)', margin: 0, letterSpacing: '0.2em', textShadow: '0 0 20px rgba(255,215,0,0.6)' }}>MERRY CHRISTMAS</h1>
+        <p style={{ opacity: 0.8, letterSpacing: '0.1em', marginTop: '10px' }}>{isPressed ? "Interactive 3D Installation" : "Hold to Assemble"}</p>
       </div>
 
       <Canvas 

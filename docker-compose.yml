@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  christmas-tree:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: gemini-christmas-tree
+    restart: always
+    ports:
+      - "8080:80" # 将主机的 8080 端口映射到容器的 80 端口
+    environment:
+      - NODE_ENV=production
